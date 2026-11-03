@@ -19,7 +19,7 @@ const state = {
   active: 0, running: false, stream: null, facing: 'user', mirror: true,
   handFrame: true, intensity: .82, grain: .14, handLandmarker: null,
   handResults: null, modelStatus: 'idle', lastDetect: 0, lastVideoTime: -1,
-  frameTimes: [], trackedRect: null
+  frameTimes: [], trackedPoints: null
 };
 
 const $ = (s) => document.querySelector(s);
@@ -55,6 +55,7 @@ async function startCamera() {
     await video.play();
     state.running = true;
     $('#intro').classList.add('hidden');
+    $('#guide').hidden = true;
     $('#signal').classList.add('live');
     $('#trackingStatus').textContent = 'LOADING AI';
     resize();
@@ -81,15 +82,14 @@ async function initHandTracking() {
         delegate: 'GPU'
       },
       runningMode: 'VIDEO', numHands: 2,
-      minHandDetectionConfidence: .45, minHandPresenceConfidence: .45, minTrackingConfidence: .45
+      minHandDetectionConfidence: .55, minHandPresenceConfidence: .55, minTrackingConfidence: .55
     });
     state.modelStatus = 'ready';
     $('#trackingStatus').textContent = 'FRAMING';
   } catch (error) {
-    console.warn('Hand tracking unavailable; using center frame.', error);
+    console.warn('Hand tracking unavailable; effects remain paused.', error);
     state.modelStatus = 'fallback';
-    $('#trackingStatus').textContent = 'MANUAL FRAME';
-    $('#guideLabel').textContent = 'CENTER FRAME / AI OFFLINE';
+    $('#trackingStatus').textContent = 'AI OFFLINE';
   }
 }
 
@@ -120,26 +120,89 @@ function drawVideo(targetCtx) {
 }
 
 function detectHands(now) {
-  if (!state.handLandmarker || video.currentTime === state.lastVideoTime || now - state.lastDetect < 55) return;
+  if (!state.handLandmarker || video.currentTime === state.lastVideoTime || now - state.lastDetect < 34) return;
   state.lastVideoTime = video.currentTime;
   state.lastDetect = now;
   try { state.handResults = state.handLandmarker.detectForVideo(video, now); } catch (error) { console.warn(error); }
 }
 
-function targetRect() {
-  const fallback = { x: canvas.width * .32, y: canvas.height * .29, w: canvas.width * .36, h: canvas.height * .42 };
-  if (!state.handFrame || !state.handResults?.landmarks?.length || state.handResults.landmarks.length < 2) return fallback;
+function toCanvasPoint(point) {
   const t = coverTransform();
-  const points = state.handResults.landmarks.flat();
-  let minX = 1, maxX = 0, minY = 1, maxY = 0;
-  points.forEach((p) => { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); });
-  if (state.mirror && state.facing === 'user') [minX, maxX] = [1 - maxX, 1 - minX];
-  const padX = Math.max(.02, (maxX - minX) * .08), padY = Math.max(.03, (maxY - minY) * .15);
-  const raw = { x: t.x + (minX - padX) * t.w, y: t.y + (minY - padY) * t.h, w: (maxX - minX + padX * 2) * t.w, h: (maxY - minY + padY * 2) * t.h };
-  if (!state.trackedRect) state.trackedRect = raw;
-  const a = .2;
-  for (const key of ['x','y','w','h']) state.trackedRect[key] += (raw[key] - state.trackedRect[key]) * a;
-  return state.trackedRect;
+  const x = state.mirror && state.facing === 'user' ? 1 - point.x : point.x;
+  return { x: t.x + x * t.w, y: t.y + point.y * t.h };
+}
+
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function orderPolygon(points) {
+  const center = points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
+  return [...points].sort((a, b) => Math.atan2(a.y - center.y, a.x - center.x) - Math.atan2(b.y - center.y, b.x - center.x));
+}
+
+function polygonArea(points) {
+  return Math.abs(points.reduce((area, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return area + point.x * next.y - next.x * point.y;
+  }, 0) / 2);
+}
+
+function polygonBounds(points) {
+  const xs = points.map((point) => point.x), ys = points.map((point) => point.y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+function smoothPoints(rawPoints) {
+  if (!state.trackedPoints) state.trackedPoints = rawPoints.map((point) => ({ ...point }));
+  state.trackedPoints.forEach((point, index) => {
+    const target = rawPoints[index];
+    const movement = distance(point, target);
+    const alpha = Math.min(.72, Math.max(.3, .3 + movement / (canvas.width * .12)));
+    point.x += (target.x - point.x) * alpha;
+    point.y += (target.y - point.y) * alpha;
+  });
+  return state.trackedPoints;
+}
+
+function targetGeometry() {
+  const landmarks = state.handResults?.landmarks || [];
+  if (landmarks.length < 2) {
+    state.trackedPoints = null;
+    return { active: false, quad: null, bounds: null };
+  }
+
+  const hands = landmarks.slice(0, 2).map((hand) => ({
+    landmarks: hand,
+    center: toCanvasPoint(hand[9])
+  })).sort((a, b) => a.center.x - b.center.x);
+
+  const rawPoints = state.handFrame
+    ? [
+        toCanvasPoint(hands[0].landmarks[8]),
+        toCanvasPoint(hands[0].landmarks[4]),
+        toCanvasPoint(hands[1].landmarks[4]),
+        toCanvasPoint(hands[1].landmarks[8])
+      ]
+    : [
+        { x: canvas.width * .32, y: canvas.height * .29 },
+        { x: canvas.width * .32, y: canvas.height * .71 },
+        { x: canvas.width * .68, y: canvas.height * .71 },
+        { x: canvas.width * .68, y: canvas.height * .29 }
+      ];
+
+  const tracked = smoothPoints(rawPoints);
+  const quad = orderPolygon(tracked);
+  const leftSpan = distance(tracked[0], tracked[1]);
+  const rightSpan = distance(tracked[2], tracked[3]);
+  const handGap = distance(hands[0].center, hands[1].center);
+  const active = leftSpan > canvas.width * .018
+    && rightSpan > canvas.width * .018
+    && handGap > canvas.width * .08
+    && polygonArea(quad) > canvas.width * canvas.height * .004;
+
+  return { active, quad, bounds: polygonBounds(quad) };
 }
 
 function thermal(r, amount) {
@@ -214,27 +277,70 @@ function applyEffect(rect) {
   return r;
 }
 
-function updateGuide(r, hands) {
-  const guide=$('#guide'), sx=innerWidth/canvas.width, sy=innerHeight/canvas.height;
-  guide.style.left=`${(r.x+r.w/2)*sx}px`; guide.style.top=`${(r.y+r.h/2)*sy}px`; guide.style.width=`${r.w*sx}px`; guide.style.height=`${r.h*sy}px`; guide.style.aspectRatio='auto';
-  guide.classList.toggle('tracking',hands>=2);
-  $('#guideLabel').textContent=hands>=2?'FRAME LOCKED':'RAISE TWO HANDS TO FRAME';
+function drawFrameGuide(quad, hands, active) {
+  const dpr = canvas.width / innerWidth;
+  const fallback = [
+    { x: canvas.width * .34, y: canvas.height * .32 },
+    { x: canvas.width * .66, y: canvas.height * .32 },
+    { x: canvas.width * .66, y: canvas.height * .68 },
+    { x: canvas.width * .34, y: canvas.height * .68 }
+  ];
+  const points = quad || fallback;
+  const bracket = 30 * dpr;
+  const label = active ? 'FRAME LOCKED' : hands === 1 ? 'ONE MORE HAND' : hands >= 2 ? 'OPEN THE FRAME' : 'RAISE TWO HANDS TO FRAME';
+  const center = points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
+  const top = Math.min(...points.map((point) => point.y));
+
+  ctx.save();
+  ctx.strokeStyle = active ? '#d9ff45' : 'rgba(217,255,69,.56)';
+  ctx.fillStyle = ctx.strokeStyle;
+  ctx.lineWidth = 2 * dpr;
+  ctx.lineCap = 'square';
+  points.forEach((point, index) => {
+    const previous = points[(index - 1 + points.length) % points.length];
+    const next = points[(index + 1) % points.length];
+    const toward = (target) => {
+      const length = Math.max(1, distance(point, target));
+      return { x: point.x + (target.x - point.x) / length * Math.min(bracket, length * .28), y: point.y + (target.y - point.y) / length * Math.min(bracket, length * .28) };
+    };
+    const before = toward(previous), after = toward(next);
+    ctx.beginPath();
+    ctx.moveTo(before.x, before.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.lineTo(after.x, after.y);
+    ctx.stroke();
+  });
+  ctx.font = `${9 * dpr}px "SFMono-Regular", Consolas, monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(label, center.x, Math.max(18 * dpr, top - 10 * dpr));
+  ctx.restore();
 }
 
-function updateTelemetry(now, hands) {
+function updateTelemetry(now, hands, active) {
   state.frameTimes.push(now); while(state.frameTimes.length&&state.frameTimes[0]<now-1000) state.frameTimes.shift();
   $('#fps').textContent=`${state.frameTimes.length} FPS`;
   $('#handCount').textContent=`${Math.min(hands,2)}/2 HANDS`;
-  if(state.modelStatus==='ready') $('#trackingStatus').textContent=hands>=2?'FRAME LOCK':'FRAMING';
+  if(state.modelStatus==='ready') $('#trackingStatus').textContent=active?'FRAME LOCK':hands>=2?'ALIGNING':'FRAMING';
 }
 
 function render(now) {
   if(!state.running) return;
   detectHands(now);
   drawVideo(ctx); drawVideo(fx);
-  const hands=state.handResults?.landmarks?.length||0, rect=targetRect(), r=applyEffect(rect);
-  ctx.save(); ctx.globalAlpha=.96; ctx.drawImage(fxCanvas,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h); ctx.restore();
-  updateGuide(r,hands); updateTelemetry(now,hands);
+  const hands=state.handResults?.landmarks?.length||0, geometry=targetGeometry();
+  if(geometry.active) {
+    const r=applyEffect(geometry.bounds);
+    ctx.save();
+    ctx.beginPath();
+    geometry.quad.forEach((point,index)=>index?ctx.lineTo(point.x,point.y):ctx.moveTo(point.x,point.y));
+    ctx.closePath();
+    ctx.clip();
+    ctx.globalAlpha=.96;
+    ctx.drawImage(fxCanvas,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h);
+    ctx.restore();
+  }
+  drawFrameGuide(geometry.quad,hands,geometry.active); updateTelemetry(now,hands,geometry.active);
   requestAnimationFrame(render);
 }
 
@@ -254,11 +360,11 @@ $('#captureButton').addEventListener('click',snapshot);
 $('#privacyButton').addEventListener('click',()=>toggleHidden($('#privacyNote'),$('#privacyButton')));
 $('#settingsButton').addEventListener('click',()=>toggleHidden($('#controls'),$('#settingsButton')));
 $('#closeControls').addEventListener('click',()=>toggleHidden($('#controls'),$('#settingsButton')));
-$('#flipButton').addEventListener('click',async()=>{state.facing=state.facing==='user'?'environment':'user';state.handResults=null;state.trackedRect=null;await startCamera();});
+$('#flipButton').addEventListener('click',async()=>{state.facing=state.facing==='user'?'environment':'user';state.handResults=null;state.trackedPoints=null;await startCamera();});
 $('#intensity').addEventListener('input',(e)=>{state.intensity=e.target.value/100;$('#intensityValue').textContent=e.target.value;});
 $('#grain').addEventListener('input',(e)=>{state.grain=e.target.value/100;$('#grainValue').textContent=e.target.value;});
-$('#mirror').addEventListener('change',(e)=>state.mirror=e.target.checked);
-$('#handFrame').addEventListener('change',(e)=>{state.handFrame=e.target.checked;state.trackedRect=null;});
+$('#mirror').addEventListener('change',(e)=>{state.mirror=e.target.checked;state.trackedPoints=null;});
+$('#handFrame').addEventListener('change',(e)=>{state.handFrame=e.target.checked;state.trackedPoints=null;});
 addEventListener('resize',resize);
 addEventListener('keydown',(e)=>{if(e.key==='ArrowLeft')setEffect(state.active-1);if(e.key==='ArrowRight')setEffect(state.active+1);if(e.code==='Space'&&e.target===document.body){e.preventDefault();snapshot();}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)state.frameTimes=[];});
