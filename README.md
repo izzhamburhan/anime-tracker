@@ -3,6 +3,7 @@
 An immersive, privacy-first camera playground inspired by the supplied reference. It tracks up to two hands and turns the space between them into a live effect window.
 
 Effects: Thermal, ASCII, Halftone, Edge, Night Vision, Duotone, Pixel, and clean camera.
+Effects: Thermal, Anime Toon, ASCII, Halftone, Edge, Night Vision, Duotone, Pixel, and clean camera.
 
 ## Run locally
 
