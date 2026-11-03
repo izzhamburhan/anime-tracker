@@ -1,4 +1,5 @@
 import { advancePinchGesture } from './gesture.js';
+import { AnimeAI } from './anime-ai.js';
 
 const video = document.querySelector('#camera');
 const canvas = document.querySelector('#output');
@@ -7,13 +8,14 @@ const fxCanvas = document.createElement('canvas');
 const fx = fxCanvas.getContext('2d', { willReadFrequently: true });
 
 const effects = [
-  { id: 'thermal', label: 'Thermal', meta: 'THERMAL / SPECTRUM 01' },
-  { id: 'ascii', label: 'ASCII', meta: 'ASCII / GLYPH 02' },
-  { id: 'halftone', label: 'Halftone', meta: 'HALFTONE / PRINT 03' },
-  { id: 'edge', label: 'Edge', meta: 'EDGE / CONTOUR 04' },
-  { id: 'night', label: 'Night', meta: 'NIGHT / PHOSPHOR 05' },
-  { id: 'duotone', label: 'Duotone', meta: 'DUOTONE / ACID 06' },
-  { id: 'pixel', label: 'Pixel', meta: 'PIXEL / LOW-RES 07' },
+  { id: 'anime', label: 'AI Anime', meta: 'AI ANIME / NEURAL 01' },
+  { id: 'thermal', label: 'Thermal', meta: 'THERMAL / SPECTRUM 02' },
+  { id: 'ascii', label: 'ASCII', meta: 'ASCII / GLYPH 03' },
+  { id: 'halftone', label: 'Halftone', meta: 'HALFTONE / PRINT 04' },
+  { id: 'edge', label: 'Edge', meta: 'EDGE / CONTOUR 05' },
+  { id: 'night', label: 'Night', meta: 'NIGHT / PHOSPHOR 06' },
+  { id: 'duotone', label: 'Duotone', meta: 'DUOTONE / ACID 07' },
+  { id: 'pixel', label: 'Pixel', meta: 'PIXEL / LOW-RES 08' },
   { id: 'clean', label: 'Clean', meta: 'CLEAN / CAMERA 00' }
 ];
 
@@ -22,7 +24,9 @@ const state = {
   handFrame: true, gestureSwitch: true, intensity: .82, grain: .14, handLandmarker: null,
   handResults: null, modelStatus: 'idle', lastDetect: 0, lastVideoTime: -1,
   frameTimes: [], trackedPoints: null, pinchStarted: 0, pinchLatched: false,
-  gestureProgress: 0, gestureMessage: '', gestureMessageUntil: 0
+  gestureProgress: 0, gestureMessage: '', gestureMessageUntil: 0,
+  anime: new AnimeAI(), animeInFlight: false, animeHasFrame: false,
+  animeLastRun: 0, animeGeneration: 0, animeFrameActive: false
 };
 
 const $ = (s) => document.querySelector(s);
@@ -38,10 +42,23 @@ effects.forEach((effect, index) => {
 });
 
 function setEffect(index) {
+  state.animeGeneration += 1;
+  state.animeHasFrame = false;
   state.active = (index + effects.length) % effects.length;
   [...effectsEl.children].forEach((el, i) => el.classList.toggle('active', i === state.active));
   $('#effectMeta').textContent = effects[state.active].meta;
   effectsEl.children[state.active].scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  if (effects[state.active].id === 'anime') ensureAnimeAI();
+}
+
+async function ensureAnimeAI() {
+  if (state.anime.status === 'ready' || state.anime.status === 'loading') return;
+  try {
+    await state.anime.load();
+  } catch (error) {
+    console.error('Anime AI failed to load.', error);
+    showError('AI ANIME UNAVAILABLE — Check your connection, then select AI Anime again.');
+  }
 }
 
 async function startCamera() {
@@ -63,6 +80,7 @@ async function startCamera() {
     $('#trackingStatus').textContent = 'LOADING AI';
     resize();
     initHandTracking();
+    if (effects[state.active].id === 'anime') ensureAnimeAI();
     requestAnimationFrame(render);
   } catch (error) {
     showError(error.name === 'NotAllowedError'
@@ -287,8 +305,26 @@ function applyEffect(rect) {
   const r={x:Math.max(0,Math.floor(rect.x)),y:Math.max(0,Math.floor(rect.y)),w:Math.max(1,Math.min(canvas.width-Math.max(0,Math.floor(rect.x)),Math.floor(rect.w))),h:Math.max(1,Math.min(canvas.height-Math.max(0,Math.floor(rect.y)),Math.floor(rect.h)))};
   const id=effects[state.active].id;
   if(id==='thermal') thermal(r,state.intensity); else if(id==='ascii') ascii(r); else if(id==='halftone') halftone(r); else if(id==='edge') edge(r); else if(id==='night'||id==='duotone') colorMap(r,id); else if(id==='pixel') pixel(r);
-  if(id!=='clean'&&id!=='ascii'&&id!=='halftone') addGrain(r);
+  if(id!=='clean'&&id!=='anime'&&id!=='ascii'&&id!=='halftone') addGrain(r);
   return r;
+}
+
+function scheduleAnimeFrame(rect, now) {
+  if (state.anime.status === 'idle') ensureAnimeAI();
+  if (state.anime.status !== 'ready' || state.animeInFlight || now - state.animeLastRun < 90) return;
+
+  state.animeInFlight = true;
+  state.animeLastRun = now;
+  const generation = state.animeGeneration;
+  state.anime.infer(fxCanvas, rect).then(() => {
+    if (generation === state.animeGeneration && state.animeFrameActive) state.animeHasFrame = true;
+  }).catch((error) => {
+    console.error('Anime AI inference failed.', error);
+    state.anime.status = 'error';
+    state.anime.error = error;
+  }).finally(() => {
+    state.animeInFlight = false;
+  });
 }
 
 function drawFrameGuide(quad, hands, active, now) {
@@ -303,6 +339,10 @@ function drawFrameGuide(quad, hands, active, now) {
   const bracket = 30 * dpr;
   const label = now < state.gestureMessageUntil
     ? state.gestureMessage
+    : effects[state.active].id === 'anime' && active && state.anime.status === 'loading'
+      ? 'LOADING AI MODEL'
+      : effects[state.active].id === 'anime' && active && state.anime.status === 'error'
+        ? 'AI MODEL UNAVAILABLE'
     : state.gestureProgress > 0
       ? `HOLD PINCH ${Math.round(state.gestureProgress * 100)}%`
       : active ? 'FRAME LOCKED' : hands === 1 ? 'ONE MORE HAND' : hands >= 2 ? 'OPEN THE FRAME' : 'RAISE TWO HANDS TO FRAME';
@@ -339,7 +379,12 @@ function updateTelemetry(now, hands, active) {
   state.frameTimes.push(now); while(state.frameTimes.length&&state.frameTimes[0]<now-1000) state.frameTimes.shift();
   $('#fps').textContent=`${state.frameTimes.length} FPS`;
   $('#handCount').textContent=`${Math.min(hands,2)}/2 HANDS`;
-  if(state.modelStatus==='ready') $('#trackingStatus').textContent=active?'FRAME LOCK':hands>=2?'ALIGNING':'FRAMING';
+  if (effects[state.active].id === 'anime' && state.anime.status !== 'idle') {
+    if (state.anime.status === 'loading') $('#trackingStatus').textContent = 'AI LOADING';
+    else if (state.anime.status === 'error') $('#trackingStatus').textContent = 'AI OFFLINE';
+    else if (active && state.anime.latency) $('#trackingStatus').textContent = `${state.anime.backend.toUpperCase()} ${state.anime.latency}MS`;
+    else $('#trackingStatus').textContent = 'AI READY';
+  } else if(state.modelStatus==='ready') $('#trackingStatus').textContent=active?'FRAME LOCK':hands>=2?'ALIGNING':'FRAMING';
 }
 
 function render(now) {
@@ -349,15 +394,23 @@ function render(now) {
   const landmarks=state.handResults?.landmarks||[], hands=landmarks.length;
   handleFilterGesture(now,landmarks);
   const geometry=targetGeometry();
+  if (!geometry.active && state.animeFrameActive) {
+    state.animeGeneration += 1;
+    state.animeHasFrame = false;
+  }
+  state.animeFrameActive = geometry.active;
   if(geometry.active) {
     const r=applyEffect(geometry.bounds);
+    const isAnime = effects[state.active].id === 'anime';
+    if (isAnime) scheduleAnimeFrame(r, now);
     ctx.save();
     ctx.beginPath();
     geometry.quad.forEach((point,index)=>index?ctx.lineTo(point.x,point.y):ctx.moveTo(point.x,point.y));
     ctx.closePath();
     ctx.clip();
     ctx.globalAlpha=.96;
-    ctx.drawImage(fxCanvas,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h);
+    if (isAnime && state.animeHasFrame) ctx.drawImage(state.anime.outputCanvas, r.x, r.y, r.w, r.h);
+    else if (!isAnime) ctx.drawImage(fxCanvas,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h);
     ctx.restore();
   }
   drawFrameGuide(geometry.quad,hands,geometry.active,now); updateTelemetry(now,hands,geometry.active);
