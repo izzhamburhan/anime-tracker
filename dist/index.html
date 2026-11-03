@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#11110f" />
+    <meta name="description" content="Frame Lab — shape live camera effects with your hands." />
+    <title>Frame Lab — Live camera effects</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="preconnect" href="https://storage.googleapis.com" crossorigin />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="stage" id="stage">
+      <video id="camera" autoplay playsinline muted aria-hidden="true"></video>
+      <canvas id="output" aria-label="Live camera with selected visual effect"></canvas>
+
+      <header class="topbar">
+        <div class="telemetry panel" aria-live="polite">
+          <span class="signal" id="signal"></span>
+          <span id="trackingStatus">STANDBY</span>
+          <span class="muted" id="handCount">0/2 HANDS</span>
+          <span class="muted" id="fps">-- FPS</span>
+          <span class="muted hide-mobile">ON DEVICE</span>
+        </div>
+
+        <div class="wordmark" aria-label="Frame Lab">
+          <span>FRAME</span><i></i><span>LAB</span>
+        </div>
+
+        <button class="privacy panel" id="privacyButton" type="button" aria-expanded="false">
+          <span class="lock">◇</span>
+          <span>PRIVATE FEED</span>
+        </button>
+      </header>
+
+      <aside class="privacyNote panel" id="privacyNote" hidden>
+        <strong>YOUR CAMERA STAYS HERE</strong>
+        <p>Frames are processed locally. Nothing is recorded until you press capture.</p>
+      </aside>
+
+      <div class="guide" id="guide" aria-hidden="true">
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+        <span class="guideLabel" id="guideLabel">RAISE TWO HANDS TO FRAME</span>
+      </div>
+
+      <section class="intro" id="intro" aria-labelledby="introTitle">
+        <div class="introIndex">CAMERA EXPERIMENT / 01</div>
+        <h1 id="introTitle">Shape the<br /><em>signal.</em></h1>
+        <p>Raise both hands and the space between them becomes your canvas.</p>
+        <button class="startButton" id="startButton" type="button">
+          <span>ENTER CAMERA</span><span aria-hidden="true">↗</span>
+        </button>
+        <small>Camera permission required · nothing leaves your device</small>
+      </section>
+
+      <div class="errorToast panel" id="errorToast" role="alert" hidden></div>
+
+      <nav class="effectDock panel" aria-label="Visual effects">
+        <button class="dockArrow" id="previousEffect" type="button" aria-label="Previous effect">←</button>
+        <div class="effects" id="effects"></div>
+        <button class="dockArrow" id="nextEffect" type="button" aria-label="Next effect">→</button>
+        <span class="divider"></span>
+        <button class="iconButton captureButton" id="captureButton" type="button" aria-label="Save snapshot" title="Save snapshot [Space]">
+          <span></span>
+        </button>
+        <button class="iconButton" id="flipButton" type="button" aria-label="Switch camera" title="Switch camera">↺</button>
+        <button class="iconButton" id="settingsButton" type="button" aria-label="Open controls" aria-expanded="false">☷</button>
+      </nav>
+
+      <aside class="controls panel" id="controls" aria-label="Effect controls" hidden>
+        <div class="controlsHead"><span>IMAGE CONTROLS</span><button id="closeControls" type="button">×</button></div>
+        <label>INTENSITY <output id="intensityValue">82</output><input id="intensity" type="range" min="20" max="100" value="82" /></label>
+        <label>GRAIN <output id="grainValue">14</output><input id="grain" type="range" min="0" max="40" value="14" /></label>
+        <label class="toggleRow"><span>MIRROR FEED</span><input id="mirror" type="checkbox" checked /><i></i></label>
+        <label class="toggleRow"><span>HAND FRAME</span><input id="handFrame" type="checkbox" checked /><i></i></label>
+      </aside>
+
+      <footer class="footerLine">
+        <span id="effectMeta">THERMAL / SPECTRUM 01</span>
+        <span class="hide-mobile">SPACE TO CAPTURE · ← → TO SWITCH</span>
+      </footer>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
