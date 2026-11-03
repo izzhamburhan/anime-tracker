@@ -1,5 +1,4 @@
 import { advancePinchGesture } from './gesture.js';
-import { applyAnimeToImage } from './filters.js';
 
 const video = document.querySelector('#camera');
 const canvas = document.querySelector('#output');
@@ -9,13 +8,12 @@ const fx = fxCanvas.getContext('2d', { willReadFrequently: true });
 
 const effects = [
   { id: 'thermal', label: 'Thermal', meta: 'THERMAL / SPECTRUM 01' },
-  { id: 'anime', label: 'Anime', meta: 'ANIME / CEL-SHADE 02' },
-  { id: 'ascii', label: 'ASCII', meta: 'ASCII / GLYPH 03' },
-  { id: 'halftone', label: 'Halftone', meta: 'HALFTONE / PRINT 04' },
-  { id: 'edge', label: 'Edge', meta: 'EDGE / CONTOUR 05' },
-  { id: 'night', label: 'Night', meta: 'NIGHT / PHOSPHOR 06' },
-  { id: 'duotone', label: 'Duotone', meta: 'DUOTONE / ACID 07' },
-  { id: 'pixel', label: 'Pixel', meta: 'PIXEL / LOW-RES 08' },
+  { id: 'ascii', label: 'ASCII', meta: 'ASCII / GLYPH 02' },
+  { id: 'halftone', label: 'Halftone', meta: 'HALFTONE / PRINT 03' },
+  { id: 'edge', label: 'Edge', meta: 'EDGE / CONTOUR 04' },
+  { id: 'night', label: 'Night', meta: 'NIGHT / PHOSPHOR 05' },
+  { id: 'duotone', label: 'Duotone', meta: 'DUOTONE / ACID 06' },
+  { id: 'pixel', label: 'Pixel', meta: 'PIXEL / LOW-RES 07' },
   { id: 'clean', label: 'Clean', meta: 'CLEAN / CAMERA 00' }
 ];
 
@@ -236,12 +234,6 @@ function thermal(r, amount) {
   fx.putImageData(image, r.x, r.y);
 }
 
-function anime(r) {
-  const image = fx.getImageData(r.x, r.y, r.w, r.h);
-  applyAnimeToImage(image, r.w, r.h, state.intensity);
-  fx.putImageData(image, r.x, r.y);
-}
-
 function colorMap(r, mode) {
   const image = fx.getImageData(r.x, r.y, r.w, r.h), d = image.data;
   for (let i=0;i<d.length;i+=4) {
@@ -294,8 +286,8 @@ function addGrain(r) {
 function applyEffect(rect) {
   const r={x:Math.max(0,Math.floor(rect.x)),y:Math.max(0,Math.floor(rect.y)),w:Math.max(1,Math.min(canvas.width-Math.max(0,Math.floor(rect.x)),Math.floor(rect.w))),h:Math.max(1,Math.min(canvas.height-Math.max(0,Math.floor(rect.y)),Math.floor(rect.h)))};
   const id=effects[state.active].id;
-  if(id==='thermal') thermal(r,state.intensity); else if(id==='anime') anime(r); else if(id==='ascii') ascii(r); else if(id==='halftone') halftone(r); else if(id==='edge') edge(r); else if(id==='night'||id==='duotone') colorMap(r,id); else if(id==='pixel') pixel(r);
-  if(id!=='clean'&&id!=='anime'&&id!=='ascii'&&id!=='halftone') addGrain(r);
+  if(id==='thermal') thermal(r,state.intensity); else if(id==='ascii') ascii(r); else if(id==='halftone') halftone(r); else if(id==='edge') edge(r); else if(id==='night'||id==='duotone') colorMap(r,id); else if(id==='pixel') pixel(r);
+  if(id!=='clean'&&id!=='ascii'&&id!=='halftone') addGrain(r);
   return r;
 }
 
