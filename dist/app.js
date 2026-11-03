@@ -1,3 +1,5 @@
+import { advancePinchGesture } from './gesture.js';
+
 const video = document.querySelector('#camera');
 const canvas = document.querySelector('#output');
 const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
@@ -17,9 +19,10 @@ const effects = [
 
 const state = {
   active: 0, running: false, stream: null, facing: 'user', mirror: true,
-  handFrame: true, intensity: .82, grain: .14, handLandmarker: null,
+  handFrame: true, gestureSwitch: true, intensity: .82, grain: .14, handLandmarker: null,
   handResults: null, modelStatus: 'idle', lastDetect: 0, lastVideoTime: -1,
-  frameTimes: [], trackedPoints: null
+  frameTimes: [], trackedPoints: null, pinchStarted: 0, pinchLatched: false,
+  gestureProgress: 0, gestureMessage: '', gestureMessageUntil: 0
 };
 
 const $ = (s) => document.querySelector(s);
@@ -134,6 +137,17 @@ function toCanvasPoint(point) {
 
 function distance(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function handleFilterGesture(now, landmarks) {
+  const result = advancePinchGesture(state, now, landmarks, { enabled: state.gestureSwitch });
+  state.gestureProgress = result.progress;
+  if (!result.triggered) return;
+
+  setEffect(state.active + 1);
+  state.gestureMessage = `${effects[state.active].label.toUpperCase()} SELECTED`;
+  state.gestureMessageUntil = now + 1100;
+  navigator.vibrate?.(45);
 }
 
 function orderPolygon(points) {
@@ -277,7 +291,7 @@ function applyEffect(rect) {
   return r;
 }
 
-function drawFrameGuide(quad, hands, active) {
+function drawFrameGuide(quad, hands, active, now) {
   const dpr = canvas.width / innerWidth;
   const fallback = [
     { x: canvas.width * .34, y: canvas.height * .32 },
@@ -287,7 +301,11 @@ function drawFrameGuide(quad, hands, active) {
   ];
   const points = quad || fallback;
   const bracket = 30 * dpr;
-  const label = active ? 'FRAME LOCKED' : hands === 1 ? 'ONE MORE HAND' : hands >= 2 ? 'OPEN THE FRAME' : 'RAISE TWO HANDS TO FRAME';
+  const label = now < state.gestureMessageUntil
+    ? state.gestureMessage
+    : state.gestureProgress > 0
+      ? `HOLD PINCH ${Math.round(state.gestureProgress * 100)}%`
+      : active ? 'FRAME LOCKED' : hands === 1 ? 'ONE MORE HAND' : hands >= 2 ? 'OPEN THE FRAME' : 'RAISE TWO HANDS TO FRAME';
   const center = points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
   const top = Math.min(...points.map((point) => point.y));
 
@@ -328,7 +346,9 @@ function render(now) {
   if(!state.running) return;
   detectHands(now);
   drawVideo(ctx); drawVideo(fx);
-  const hands=state.handResults?.landmarks?.length||0, geometry=targetGeometry();
+  const landmarks=state.handResults?.landmarks||[], hands=landmarks.length;
+  handleFilterGesture(now,landmarks);
+  const geometry=targetGeometry();
   if(geometry.active) {
     const r=applyEffect(geometry.bounds);
     ctx.save();
@@ -340,7 +360,7 @@ function render(now) {
     ctx.drawImage(fxCanvas,r.x,r.y,r.w,r.h,r.x,r.y,r.w,r.h);
     ctx.restore();
   }
-  drawFrameGuide(geometry.quad,hands,geometry.active); updateTelemetry(now,hands,geometry.active);
+  drawFrameGuide(geometry.quad,hands,geometry.active,now); updateTelemetry(now,hands,geometry.active);
   requestAnimationFrame(render);
 }
 
@@ -365,6 +385,7 @@ $('#intensity').addEventListener('input',(e)=>{state.intensity=e.target.value/10
 $('#grain').addEventListener('input',(e)=>{state.grain=e.target.value/100;$('#grainValue').textContent=e.target.value;});
 $('#mirror').addEventListener('change',(e)=>{state.mirror=e.target.checked;state.trackedPoints=null;});
 $('#handFrame').addEventListener('change',(e)=>{state.handFrame=e.target.checked;state.trackedPoints=null;});
+$('#gestureSwitch').addEventListener('change',(e)=>{state.gestureSwitch=e.target.checked;state.pinchStarted=0;state.pinchLatched=false;state.gestureProgress=0;});
 addEventListener('resize',resize);
 addEventListener('keydown',(e)=>{if(e.key==='ArrowLeft')setEffect(state.active-1);if(e.key==='ArrowRight')setEffect(state.active+1);if(e.code==='Space'&&e.target===document.body){e.preventDefault();snapshot();}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)state.frameTimes=[];});
